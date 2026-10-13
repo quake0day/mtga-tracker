@@ -1,0 +1,673 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>MTGA Tracker</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto; margin: 0; background:#111;color:#eee; }
+    header { padding: 12px 16px; background:#1b1b1b; display:flex; align-items:center; gap:12px; border-bottom:1px solid #333; }
+    header h1 { font-size:16px; margin:0; font-weight:600; }
+    #status { font-size:12px; padding:3px 8px; border-radius: 999px; background:#333; }
+    #status.ok { background:#1f6b34; }
+    #status.err { background:#7a1f1f; }
+    main { padding: 16px; display:grid; grid-template-columns: 1fr 320px; gap:16px; }
+    nav { padding: 0 16px; background:#1b1b1b; border-bottom:1px solid #333; display:flex; gap:4px; }
+    nav button { background:transparent; border:none; color:#aaa; padding:10px 14px; font:inherit; cursor:pointer; border-bottom:2px solid transparent; }
+    nav button:hover { color:#eee; }
+    nav button.active { color:#eee; border-bottom-color:#4b85c9; }
+    main.hidden { display:none; }
+    section { background:#181818; border:1px solid #2a2a2a; border-radius:6px; padding:12px 14px; }
+    h2 { margin:0 0 10px; font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:#999; }
+    table { width:100%; border-collapse: collapse; font-size:13px; }
+    th, td { text-align:left; padding:4px 8px; border-bottom:1px solid #262626; }
+    th { color:#777; font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+    tr:hover { background:#1f1f1f; }
+    .deck-list { max-height: 76vh; overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; scrollbar-color:#444 #1b1b1b; }
+    .deck-list::-webkit-scrollbar { width:8px; }
+    .deck-list::-webkit-scrollbar-track { background:#1b1b1b; }
+    .deck-list::-webkit-scrollbar-thumb { background:#444; border-radius:4px; }
+    .deck-list::-webkit-scrollbar-thumb:hover { background:#555; }
+    .deck-item { padding:7px 10px; border:1px solid transparent; border-left:3px solid transparent; border-radius:3px; margin-bottom:3px; cursor:pointer; transition: background .08s ease, border-color .08s ease; }
+    .deck-item:hover { background:#1f1f1f; }
+    .deck-item.active { background:#1b2a3a; border-left-color:#4b85c9; }
+    .deck-item .name { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .deck-item .meta { color:#777; font-size:11px; margin-top:1px; }
+    .match { font-family: ui-monospace, monospace; font-size:12px; color:#aaa; white-space:pre-wrap; }
+    .pill { display:inline-block; padding:1px 7px; border-radius:999px; background:#333; font-size:11px; margin-right:4px; }
+    .err { color:#e55; font-size:12px; }
+    footer { padding: 8px 16px; color:#666; font-size:11px; border-top:1px solid #222; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MTGA Tracker</h1>
+    <span id="status">connecting…</span>
+    <span id="pid"></span>
+  </header>
+  <nav>
+    <button data-view="live" class="active">Live</button>
+    <button data-view="history">History</button>
+    <button data-view="inventory">Inventory</button>
+  </nav>
+  <main id="viewLive">
+    <section style="min-height:76vh">
+      <h2>Current Deck <span id="deckGrp" class="pill" style="display:none"></span></h2>
+      <div id="deckDetail">Select a deck on the right, or wait for a match.</div>
+    </section>
+    <section>
+      <h2>Saved Decks <span id="deckCount" class="pill">0</span></h2>
+      <div id="deckList" class="deck-list"></div>
+    </section>
+    <section style="grid-column: 1 / -1;">
+      <h2>Match</h2>
+      <div id="match" class="match">No active match.</div>
+    </section>
+    <section style="grid-column: 1 / -1;">
+      <h2>Card Timeline <span id="tlCount" class="pill">0</span>
+        <span style="color:#666;font-size:11px;font-weight:400;margin-left:8px">(opponent shows + your plays, most recent first)</span>
+      </h2>
+      <div id="timelineBody" style="max-height:260px;overflow-y:auto">Waiting for match events…</div>
+    </section>
+    <section style="grid-column: 1 / -1;">
+      <h2>Inventory</h2>
+      <div id="inv" class="match"></div>
+    </section>
+  </main>
+  <main id="viewInventory" class="hidden">
+    <section style="grid-column:1/-1">
+      <h2>Owned Cards <span id="invCount" class="pill">0</span>
+        <span style="float:right">
+          <input id="invSearch" type="text" placeholder="search name..." style="background:#2a2a2a;border:1px solid #444;color:#eee;padding:3px 8px;border-radius:3px;font:inherit;font-size:12px;width:160px" />
+          <select id="invRarity" style="background:#2a2a2a;border:1px solid #444;color:#eee;padding:3px 6px;margin-left:4px;font:inherit;font-size:12px">
+            <option value="">any rarity</option>
+            <option>Mythic</option><option>Rare</option><option>Uncommon</option><option>Common</option><option>Basic</option>
+          </select>
+          <select id="invColor" style="background:#2a2a2a;border:1px solid #444;color:#eee;padding:3px 6px;margin-left:4px;font:inherit;font-size:12px">
+            <option value="">any color</option>
+            <option>W</option><option>U</option><option>B</option><option>R</option><option>G</option><option value="">colorless</option>
+          </select>
+          <select id="invSet" style="background:#2a2a2a;border:1px solid #444;color:#eee;padding:3px 6px;margin-left:4px;font:inherit;font-size:12px"><option value="">any set</option></select>
+        </span>
+      </h2>
+      <div id="invBody">Click Inventory tab to load.</div>
+    </section>
+  </main>
+  <main id="viewHistory" class="hidden">
+    <section style="grid-column:1/-1">
+      <h2>Stats</h2>
+      <div id="statsBody">Loading…</div>
+    </section>
+    <section style="grid-column:1/-1">
+      <h2>Match History <span id="historyCount" class="pill">0</span>
+        <button id="historyRefresh" style="float:right;background:#2a2a2a;border:1px solid #444;color:#ccc;padding:3px 10px;border-radius:3px;cursor:pointer;font:inherit;font-size:11px">Refresh</button>
+      </h2>
+      <div id="historyBody">Loading…</div>
+    </section>
+  </main>
+  <footer>
+    Backend: ws://localhost:8765/ws · Target: MTGA.exe
+    <span id="lastErr" class="err"></span>
+  </footer>
+  <script>
+    const statusEl = document.getElementById('status');
+    const pidEl = document.getElementById('pid');
+    const deckListEl = document.getElementById('deckList');
+    const deckDetailEl = document.getElementById('deckDetail');
+    const deckCountEl = document.getElementById('deckCount');
+    const matchEl = document.getElementById('match');
+    const invEl = document.getElementById('inv');
+    const errEl = document.getElementById('lastErr');
+
+    let selected = null;
+    let selectedDeckName = null;  // sticky across list reorders
+    let lastSnap = null;
+
+    // Returns total card count summed over Quantity across a pile.
+    function pileTotal(pile) {
+      if (!pile) return 0;
+      return pile.reduce((n, c) => n + (c.Quantity || 0), 0);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    // Cheap signature of a deck list — if unchanged across snapshots we don't
+    // rebuild the DOM at all (keeps scroll position & avoids flicker).
+    let lastDeckListSig = null;
+    function deckListSig(decks) {
+      // Name + total card count is enough to detect edits in Arena.
+      return decks.map(d => `${d.Name}|${pileTotal(d.Piles?.MainDeck)}|${pileTotal(d.Piles?.Sideboard)}`).join('§');
+    }
+
+    function renderDeckList(decks) {
+      deckCountEl.textContent = decks.length;
+      const sig = deckListSig(decks) + '|' + selected;
+      if (sig === lastDeckListSig) {
+        // Still refresh just the "active" class in case user clicked.
+        [...deckListEl.children].forEach((el, i) => el.classList.toggle('active', i === selected));
+        return;
+      }
+      lastDeckListSig = sig;
+      // Preserve scroll position across rebuilds.
+      const scrollTop = deckListEl.scrollTop;
+      // Build off-DOM to avoid intermediate reflows.
+      const frag = document.createDocumentFragment();
+      decks.forEach((d, i) => {
+        const el = document.createElement('div');
+        el.className = 'deck-item' + (selected === i ? ' active' : '');
+        const mainN = pileTotal(d.Piles?.MainDeck);
+        const sbN = pileTotal(d.Piles?.Sideboard);
+        el.innerHTML =
+          `<div class="name">${escapeHtml(d.Name || '(unnamed)')}</div>` +
+          `<div class="meta">${escapeHtml(d.Format || '')} · main ${mainN} · sb ${sbN}</div>`;
+        el.onclick = () => {
+          if (selected === i) return;
+          selected = i;
+          selectedDeckName = decks[i]?.Name || null;
+          [...deckListEl.children].forEach((e, k) => e.classList.toggle('active', k === selected));
+          renderDeckDetail(decks[selected]);
+        };
+        frag.appendChild(el);
+      });
+      deckListEl.replaceChildren(frag);
+      deckListEl.scrollTop = scrollTop;
+    }
+
+    let lastDeckDetailSig = null;
+    function deckDetailSig(d) {
+      if (!d) return 'null';
+      const sum = pile => (pile||[]).map(c => `${c.Id}x${c.Quantity}`).join(',');
+      return `${d.Name}|${d.Format}|${d.DeckTileId}|${sum(d.Piles?.MainDeck)}|${sum(d.Piles?.Sideboard)}`;
+    }
+
+    function renderDeckDetail(d) {
+      const sig = deckDetailSig(d);
+      if (sig === lastDeckDetailSig) return;
+      lastDeckDetailSig = sig;
+      if (!d) {
+        deckDetailEl.textContent = 'Select a deck on the right.';
+        return;
+      }
+      const colorChip = (col) => {
+        const bg = { W: '#f8f0d8', U: '#5a8fcd', B: '#444', R: '#c25151', G: '#4e9d6a' }[col] || '#555';
+        const fg = col === 'W' ? '#333' : '#eee';
+        return `<span style="display:inline-block;min-width:14px;padding:0 4px;margin-right:1px;border-radius:3px;background:${bg};color:${fg};font-size:10px;font-weight:600;text-align:center">${col}</span>`;
+      };
+      const costHtml = (c) => {
+        const cost = c.ManaCost || '';
+        if (!cost) return '';
+        // Split cost into symbol chars, color letters get colored chips, digits stay plain.
+        return cost.split('').map(ch => {
+          if ('WUBRG'.includes(ch)) return colorChip(ch);
+          return `<span style="display:inline-block;min-width:14px;padding:0 4px;background:#2c2c2c;border-radius:3px;font-size:10px;text-align:center">${ch}</span>`;
+        }).join('');
+      };
+      const rows = (pile) => (pile || [])
+        .slice()
+        .sort((a, b) => {
+          const ta = (a.Types || []).includes('Land') ? 1 : 0;
+          const tb = (b.Types || []).includes('Land') ? 1 : 0;
+          if (ta !== tb) return ta - tb;  // lands last
+          return (a.Name || '').localeCompare(b.Name || '');
+        })
+        .map(c => {
+          const rarityDot = { Mythic: '#e07e2e', Rare: '#c0a060', Uncommon: '#aaa', Common: '#555' }[c.Rarity] || '#555';
+          const typeTag = (c.Types && c.Types[0]) ? c.Types[0].slice(0, 3) : '';
+          const img = c.ImageUrl ? ` data-img="${escapeHtml(c.ImageUrl)}"` : '';
+          return `<tr${img}>
+            <td style="width:28px;text-align:right;color:#aaa">${c.Quantity}×</td>
+            <td style="min-width:50px">${costHtml(c)}</td>
+            <td><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${rarityDot};margin-right:6px;vertical-align:middle"></span>${escapeHtml(c.Name || ('<grpId '+c.Id+'>'))}</td>
+            <td style="color:#777;font-size:10px">${typeTag}</td>
+          </tr>`;
+        })
+        .join('');
+      const main = d.Piles?.MainDeck || [];
+      const sb = d.Piles?.Sideboard || [];
+      const commander = d.Piles?.Commander || [];
+      const extras = Object.keys(d.Piles || {}).filter(k => !['MainDeck','Sideboard','Commander','Companion'].includes(k));
+      deckDetailEl.innerHTML =
+        `<h3 style="margin:0 0 6px">${escapeHtml(d.Name||'(unnamed)')}</h3>` +
+        `<div style="color:#888;font-size:11px;margin-bottom:10px">` +
+        `${escapeHtml(d.Format||'')} · tile ${d.DeckTileId ?? '-'} · art ${d.DeckArtId ?? '-'}` +
+        (d.LastPlayed ? ` · last ${escapeHtml(d.LastPlayed)}` : '') +
+        `</div>` +
+        `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">` +
+        `<div><h4 style="margin:0 0 4px;color:#aaa">Main (${pileTotal(main)})</h4><table>${rows(main)}</table></div>` +
+        `<div><h4 style="margin:0 0 4px;color:#aaa">Sideboard (${pileTotal(sb)})</h4><table>${rows(sb)}</table></div>` +
+        (commander.length ? `<div style="grid-column:1/-1"><h4 style="margin:0 0 4px;color:#aaa">Commander (${pileTotal(commander)})</h4><table>${rows(commander)}</table></div>` : '') +
+        `</div>` +
+        (d.Description ? `<div style="margin-top:12px;color:#aaa;font-size:12px">${escapeHtml(d.Description)}</div>` : '');
+    }
+
+    function renderPlayerPanel(label, pi, aggregatedKey) {
+      if (!pi) return `<div style="color:#777">${label}: —</div>`;
+      const rank = pi.RankingClassName && pi.RankingClassName !== 'None'
+        ? `${pi.RankingClassName} ${pi.RankingTier || ''}`.trim() : '—';
+      const myth = pi.MythicPercentile ? ` · top ${pi.MythicPercentile.toFixed(2)}%` : '';
+      const deck = pi[aggregatedKey] || [];
+      const sideboard = pi.SideboardCardsAggregated || [];
+      const list = (cards) => cards.slice()
+        .sort((a,b) => (b.Quantity||0) - (a.Quantity||0))
+        .map(c => `<div style="font-size:11px;color:#ccc">${c.Quantity}× ${escapeHtml(c.Name || c.Id)}</div>`)
+        .join('');
+      return `<div style="border:1px solid #2a2a2a;border-radius:4px;padding:8px;min-width:220px">
+        <div style="font-weight:600">${escapeHtml(pi.ScreenName || label)} <span style="color:#888;font-size:11px">· seat ${pi.SeatId}</span></div>
+        <div style="color:#888;font-size:11px;margin-bottom:6px">${rank}${myth}</div>
+        ${deck.length ? `<div style="color:#888;font-size:10px;margin-top:4px">Deck (${deck.reduce((n,c)=>n+(c.Quantity||0),0)})</div>${list(deck)}` : ''}
+        ${sideboard.length ? `<div style="color:#888;font-size:10px;margin-top:4px">SB (${sideboard.reduce((n,c)=>n+(c.Quantity||0),0)})</div>${list(sideboard)}` : ''}
+      </div>`;
+    }
+
+    function renderGameState(gs, mySeatId) {
+      if (!gs || gs.status) return '';
+      const localSeat = gs.MySeatId ?? mySeatId;
+      const sideOf = seat => seat === localSeat ? 'You' : (seat ? 'Opp' : '?');
+      // Group cards by zone+controller
+      const groups = {};
+      for (const c of gs.Cards || []) {
+        const z = c.ZoneTypeName || `Zone${c.ZoneType}`;
+        const key = `${sideOf(c.ControllerSeatId)} · ${z}`;
+        (groups[key] = groups[key] || []).push(c);
+      }
+      // Zone sizes (library counts etc. — may be larger than visible cards)
+      const zoneSizes = {};
+      for (const z of gs.Zones || []) {
+        zoneSizes[`${sideOf(z.OwnerSeatId)} · ${z.TypeName}`] = z.Count;
+      }
+      // Players: life / hand size / mana / counters
+      const playerStats = {};
+      for (const p of gs.Players || []) {
+        const side = sideOf(p.ControllerId);
+        playerStats[side] = p;
+      }
+      const playerLine = side => {
+        const p = playerStats[side];
+        if (!p) return '';
+        return `<span>${side === 'You' ? '🧍' : '🤺'} ${side}: <b>${p.LifeTotal ?? '?'}</b>❤
+          ${p.MaxHandSize ? `· hand≤${p.MaxHandSize}` : ''}
+          ${p.MulliganCount ? `· mull ${p.MulliganCount}` : ''}
+          ${p.ManaPool && p.ManaPool.length ? `· mana ${p.ManaPool.length}` : ''}
+          ${p.CounterCount ? `· ${p.CounterCount} counters` : ''}
+        </span>`;
+      };
+      const turnInfo = `<div style="font-size:11px;color:#aaa;margin-bottom:8px">
+        <b>Turn ${gs.GameWideTurn ?? '?'}</b>
+         · ${escapeHtml(gs.CurrentPhaseName || `Phase${gs.CurrentPhase}`)}/${escapeHtml(gs.CurrentStepName || `Step${gs.CurrentStep}`)}
+         · active=seat ${gs.ActivePlayerSeat ?? '?'}
+         · you=seat ${localSeat ?? '?'}
+      </div>
+      <div style="font-size:12px;margin-bottom:10px;display:flex;gap:16px">
+        ${playerLine('You')}
+        ${playerLine('Opp')}
+      </div>`;
+      const relevantZones = ['Hand', 'Battlefield', 'Graveyard', 'Exile'];
+      const order = [];
+      for (const side of ['You', 'Opp']) for (const z of relevantZones) {
+        const key = `${side} · ${z}`;
+        if (groups[key] || zoneSizes[key]) order.push(key);
+      }
+      const panels = order.map(key => {
+        const cards = groups[key] || [];
+        const totalSize = zoneSizes[key] ?? cards.length;
+        const items = cards.map(c => {
+          const dim = c.IsTapped ? 'opacity:0.5;' : '';
+          const img = c.ImageUrl ? ` data-img="${escapeHtml(c.ImageUrl)}"` : '';
+          return `<div${img} style="font-size:11px;${dim}">${escapeHtml(c.Name || `grp${c.GrpId}`)}${c.IsTapped ? ' ⤵' : ''}</div>`;
+        }).join('');
+        return `<div style="border:1px solid #2a2a2a;border-radius:4px;padding:6px 8px">
+          <div style="font-weight:600;font-size:11px;color:#aaa">${escapeHtml(key)} <span style="color:#666">(${totalSize})</span></div>
+          ${items || '<div style="color:#555;font-size:11px">—</div>'}
+        </div>`;
+      }).join('');
+      return `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #333">
+        <div style="font-weight:600;font-size:12px;color:#888;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Game State</div>
+        ${turnInfo}
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${panels}</div>
+      </div>`;
+    }
+
+    let lastMatchSig = null;
+    function matchSig(m) {
+      if (!m || !m.active) return 'inactive';
+      // Change signature when anything the UI shows changes.
+      const gs = m.GameState || {};
+      const cards = (gs.Cards||[]).map(c=>`${c.InstanceId}|${c.ZoneType}|${c.IsTapped?1:0}|${c.ControllerSeatId}`).join(',');
+      const zones = (gs.Zones||[]).map(z=>`${z.Type}:${z.Count}@${z.OwnerSeatId}`).join(',');
+      const players = (gs.Players||[]).map(p=>`${p.ControllerId}:${p.LifeTotal}:${p.MaxHandSize}:${p.MulliganCount}`).join(',');
+      return [
+        m.MatchID, m.MatchState, m.CurrentGameNumber,
+        gs.GameWideTurn, gs.CurrentPhase, gs.CurrentStep, gs.ActivePlayerSeat,
+        players, zones, cards,
+      ].join('§');
+    }
+
+    function renderMatch(match) {
+      const sig = matchSig(match);
+      if (sig === lastMatchSig) return;
+      lastMatchSig = sig;
+      if (!match || !match.active) {
+        matchEl.innerHTML = '<span style="color:#777">No match attached.</span>';
+        return;
+      }
+      const state = match.MatchStateName || `State ${match.MatchState ?? '?'}`;
+      const fmt = match.FormatName || '';
+      const variant = match.VariantName || '';
+      const game = match.CurrentGameNumber ? ` · Game ${match.CurrentGameNumber}` : '';
+      const flags = [match.IsPracticeGame && 'practice', match.IsPrivateGame && 'private'].filter(Boolean);
+      const flagsHtml = flags.length ? ` · ${flags.join(', ')}` : '';
+      const header = `<div style="margin-bottom:10px">
+        <span style="font-weight:600">${escapeHtml(state)}</span>
+        <span style="color:#888;font-size:11px">${fmt ? ' · '+fmt : ''}${variant ? ' / '+variant : ''}${game}${flagsHtml}</span>
+        ${match.MatchID ? `<span style="color:#555;font-family:ui-monospace,monospace;font-size:10px;margin-left:8px">${escapeHtml(match.MatchID)}</span>` : ''}
+      </div>`;
+      const players = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        ${renderPlayerPanel('You', match.LocalPlayer, 'DeckCardsAggregated')}
+        ${renderPlayerPanel('Opponent', match.Opponent, 'DeckCardsAggregated')}
+      </div>`;
+      const gs = renderGameState(match.GameState, match.LocalPlayerSeatId);
+      matchEl.innerHTML = header + players + gs;
+    }
+
+    function render(snap) {
+      lastSnap = snap;
+      if (!snap) return;
+      const decks = snap.decks?.decks || [];
+      // Auto-select first deck once on first non-empty payload.
+      if (selected == null && decks.length) {
+        const idx = decks.findIndex(d => pileTotal(d.Piles?.MainDeck) > 0);
+        selected = idx >= 0 ? idx : 0;
+      }
+      // When the deck at `selected` changes identity (e.g. list reordered),
+      // keep selection on the same NAMED deck instead of jumping to a new one.
+      if (selected != null && selectedDeckName && decks[selected]?.Name !== selectedDeckName) {
+        const idx = decks.findIndex(d => d.Name === selectedDeckName);
+        if (idx >= 0) selected = idx;
+      }
+      if (selected != null) selectedDeckName = decks[selected]?.Name || selectedDeckName;
+      renderDeckList(decks);
+      renderDeckDetail(selected != null ? decks[selected] : null);
+
+      renderMatch(snap.match);
+      invEl.textContent = JSON.stringify(snap.inventory, null, 2);
+
+      const errors = [snap.decks?.error, snap.inventory?.error, snap.match?.error].filter(Boolean);
+      errEl.textContent = errors.join(' · ');
+    }
+
+    function connect() {
+      const ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.onopen = () => { statusEl.textContent = 'live'; statusEl.className = 'ok'; };
+      ws.onclose = () => {
+        statusEl.textContent = 'disconnected';
+        statusEl.className = 'err';
+        setTimeout(connect, 2000);
+      };
+      ws.onerror = () => { statusEl.className = 'err'; };
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'snapshot') render(msg.data);
+        else if (msg.type === 'timeline') appendTimeline(msg.events || []);
+        else if (msg.type === 'error') { errEl.textContent = msg.error; }
+      };
+    }
+
+    // ---------- Tab navigation ----------
+    const views = {
+      live: document.getElementById('viewLive'),
+      history: document.getElementById('viewHistory'),
+      inventory: document.getElementById('viewInventory'),
+    };
+    document.querySelectorAll('nav button').forEach(b => {
+      b.onclick = () => {
+        document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x === b));
+        for (const [k, el] of Object.entries(views)) el.classList.toggle('hidden', k !== b.dataset.view);
+        if (b.dataset.view === 'history') { loadStats(); loadHistory(); }
+        if (b.dataset.view === 'inventory') loadInventory();
+      };
+    });
+
+    const historyBodyEl = document.getElementById('historyBody');
+    const historyCountEl = document.getElementById('historyCount');
+    const statsBodyEl = document.getElementById('statsBody');
+    document.getElementById('historyRefresh').onclick = () => loadHistory();
+
+    function wrText(w, l) {
+      const t = w + l;
+      if (!t) return '—';
+      const pct = (100 * w / t).toFixed(1);
+      return `${w}-${l} (${pct}%)`;
+    }
+
+    function statCardHtml(label, s) {
+      const w = s.wins || 0, l = s.losses || 0, ong = s.ongoing || 0;
+      const gw = s.games_won || 0, gl = s.games_lost || 0;
+      return `<div style="border:1px solid #2a2a2a;border-radius:4px;padding:10px 12px;min-width:180px">
+        <div style="color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.08em">${escapeHtml(label)}</div>
+        <div style="font-size:18px;margin-top:4px"><b>${wrText(w, l)}</b></div>
+        <div style="color:#777;font-size:11px;margin-top:2px">
+          ${s.matches || 0} matches · ${gw}-${gl} games
+          ${ong ? ` · ${ong} ongoing` : ''}
+        </div>
+      </div>`;
+    }
+
+    async function loadStats() {
+      try {
+        const r = await fetch('/api/stats');
+        const s = await r.json();
+        const o = s.overall || {};
+        const w = s.last_7d || {};
+        const byFormat = (s.by_format || []).filter(f => f.format);
+        const cards = [
+          statCardHtml('Overall', o),
+          statCardHtml('Last 7 days', w),
+          ...byFormat.map(f => statCardHtml(f.format, f)),
+        ];
+        statsBodyEl.innerHTML = `<div style="display:flex;gap:10px;flex-wrap:wrap">${cards.join('')}</div>`;
+      } catch (e) {
+        statsBodyEl.innerHTML = `<div class="err">Stats load failed: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    function fmtDate(ts) {
+      const d = new Date(ts * 1000);
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    async function loadHistory() {
+      historyBodyEl.textContent = 'Loading…';
+      try {
+        const r = await fetch('/api/history?limit=100');
+        const j = await r.json();
+        const rows = j.matches || [];
+        historyCountEl.textContent = rows.length;
+        if (!rows.length) {
+          historyBodyEl.innerHTML = '<div style="color:#777;padding:20px">No matches recorded yet. Play a game and come back.</div>';
+          return;
+        }
+        historyBodyEl.innerHTML = `<table style="width:100%">
+          <thead><tr>
+            <th>When</th><th>Format</th><th>Opponent</th><th>Opp Rank</th>
+            <th style="text-align:center">Result</th>
+            <th style="text-align:center">Games</th><th>State</th>
+          </tr></thead>
+          <tbody>${rows.map(m => {
+            const resCol = m.winner === 'local' ? '#2d7a3e' : m.winner === 'opponent' ? '#8a2d2d' : '#555';
+            const resLabel = m.winner === 'local' ? 'WIN' : m.winner === 'opponent' ? 'LOSS' : m.winner === 'draw' ? 'DRAW' : '—';
+            return `<tr>
+              <td style="color:#aaa">${fmtDate(m.completed_at || m.recorded_at)}</td>
+              <td>${escapeHtml((m.format||'')+(m.variant?' / '+m.variant:''))}</td>
+              <td>${escapeHtml(m.opponent_name || '—')}</td>
+              <td style="color:#aaa">${escapeHtml(m.opponent_rank || '—')}</td>
+              <td style="text-align:center"><span style="padding:1px 6px;border-radius:3px;background:${resCol};color:#eee;font-size:10px;font-weight:600">${resLabel}</span></td>
+              <td style="text-align:center;color:#aaa">${m.local_games_won ?? 0}-${m.opponent_games_won ?? 0}</td>
+              <td style="color:#aaa">${escapeHtml(m.match_state || '—')}</td>
+            </tr>`;
+          }).join('')}</tbody></table>`;
+      } catch (e) {
+        historyBodyEl.innerHTML = `<div class="err">Failed to load history: ${escapeHtml(e.message)}</div>`;
+      }
+    }
+
+    // ---------- Card timeline ----------
+    const timelineEl = document.getElementById('timelineBody');
+    const tlCountEl = document.getElementById('tlCount');
+    const timelineBuf = []; // keep in-memory, newest first
+
+    function tlRowHtml(ev) {
+      const side = ev.is_me ? '🧍 you' : '🤺 opp';
+      const sideColor = ev.is_me ? '#4b85c9' : '#c25151';
+      const t = `T${ev.turn ?? '?'}`;
+      const phase = ev.step || ev.phase || '';
+      const img = ev.image_url ? ` data-img="${escapeHtml(ev.image_url)}"` : '';
+      return `<tr${img}>
+        <td style="width:40px;color:#666;font-family:ui-monospace,monospace;font-size:10px">${t}</td>
+        <td style="width:70px;font-size:10px;color:#888">${escapeHtml(phase)}</td>
+        <td style="width:68px;font-size:11px;color:${sideColor}">${side}</td>
+        <td style="font-size:11px">${escapeHtml(ev.name || `grp${ev.grp_id}`)}</td>
+        <td style="width:90px;font-size:10px;color:#777">→ ${escapeHtml(ev.to_zone_name || `Z${ev.to_zone}`)}</td>
+      </tr>`;
+    }
+
+    function renderTimeline() {
+      tlCountEl.textContent = timelineBuf.length;
+      if (!timelineBuf.length) {
+        timelineEl.innerHTML = '<span style="color:#777">Waiting for match events…</span>';
+        return;
+      }
+      const scrollTop = timelineEl.scrollTop;
+      timelineEl.innerHTML = `<table style="width:100%"><tbody>${
+        timelineBuf.slice(0, 200).map(tlRowHtml).join('')
+      }</tbody></table>`;
+      timelineEl.scrollTop = scrollTop;
+    }
+
+    function appendTimeline(events) {
+      if (!events.length) return;
+      // Prepend newest at front so recent is on top
+      for (const ev of events) timelineBuf.unshift(ev);
+      if (timelineBuf.length > 500) timelineBuf.length = 500;
+      renderTimeline();
+    }
+
+    // Hydrate timeline on page load
+    fetch('/api/timeline?limit=200').then(r => r.json()).then(j => {
+      // server returns newest-first already
+      for (const ev of (j.events || [])) timelineBuf.push(ev);
+      renderTimeline();
+    }).catch(() => {});
+
+    // ---------- Inventory tab ----------
+    const invBody = document.getElementById('invBody');
+    const invCountEl = document.getElementById('invCount');
+    const invSearch = document.getElementById('invSearch');
+    const invRarity = document.getElementById('invRarity');
+    const invColor = document.getElementById('invColor');
+    const invSet = document.getElementById('invSet');
+    let invCache = null;
+
+    async function loadInventory() {
+      if (invCache === null) {
+        invBody.textContent = 'Loading…';
+        try {
+          const r = await fetch('/api/inventory');
+          const j = await r.json();
+          invCache = j.cards || [];
+          // Populate set dropdown
+          const sets = [...new Set(invCache.map(c => c.SetCode).filter(Boolean))].sort();
+          invSet.innerHTML = '<option value="">any set</option>' + sets.map(s => `<option>${s}</option>`).join('');
+        } catch (e) {
+          invBody.innerHTML = `<div class="err">Load failed: ${escapeHtml(e.message)}</div>`;
+          return;
+        }
+      }
+      renderInventory();
+    }
+
+    function renderInventory() {
+      if (!invCache) return;
+      const q = invSearch.value.trim().toLowerCase();
+      const r = invRarity.value;
+      const col = invColor.value;
+      const set = invSet.value;
+      const filtered = invCache.filter(c => {
+        if (q && !(c.Name || '').toLowerCase().includes(q)) return false;
+        if (r && c.Rarity !== r) return false;
+        if (set && c.SetCode !== set) return false;
+        if (col === '') { /* any — fall through */ }
+        else if (col && !(c.Colors || '').includes(col)) return false;
+        return true;
+      });
+      invCountEl.textContent = `${filtered.length} / ${invCache.length}`;
+      // Sort: rarity (mythic→common), then name
+      const rarityWeight = { Mythic: 0, Rare: 1, Uncommon: 2, Common: 3, Basic: 4 };
+      filtered.sort((a, b) => {
+        const dr = (rarityWeight[a.Rarity] ?? 9) - (rarityWeight[b.Rarity] ?? 9);
+        if (dr) return dr;
+        return (a.Name || '').localeCompare(b.Name || '');
+      });
+      // Virtualize if too many rows
+      const rows = filtered.slice(0, 500).map(c => {
+        const rarityDot = { Mythic: '#e07e2e', Rare: '#c0a060', Uncommon: '#aaa', Common: '#555', Basic: '#555' }[c.Rarity] || '#555';
+        const img = c.ImageUrl ? ` data-img="${escapeHtml(c.ImageUrl)}"` : '';
+        return `<tr${img}>
+          <td style="width:28px;text-align:right;color:#aaa">${c.Quantity}×</td>
+          <td style="width:36px"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${rarityDot};margin-right:4px"></span>${escapeHtml(c.Rarity||'').slice(0,3)}</td>
+          <td style="width:60px;color:#aaa;font-family:ui-monospace,monospace;font-size:10px">${escapeHtml(c.SetCode||'')}#${escapeHtml(c.CollectorNumber||'')}</td>
+          <td>${escapeHtml(c.Name||'')}</td>
+          <td style="color:#777;font-size:10px">${escapeHtml((c.Colors||'').split('').join(''))}</td>
+          <td style="color:#666;font-size:10px">${escapeHtml((c.Types||[])[0]||'')}</td>
+        </tr>`;
+      }).join('');
+      const truncated = filtered.length > 500 ? `<div style="color:#777;padding:8px">Showing first 500 of ${filtered.length} — add filters to narrow down.</div>` : '';
+      invBody.innerHTML = `${truncated}<table style="width:100%"><tbody>${rows}</tbody></table>`;
+    }
+
+    for (const el of [invSearch, invRarity, invColor, invSet]) {
+      el.addEventListener('input', renderInventory);
+      el.addEventListener('change', renderInventory);
+    }
+
+    // ---------- Hover preview for cards. ---------- Rows with data-img show the Scryfall image next
+    // to the cursor on hover. Uses event delegation so new rows don't need
+    // their own listeners.
+    const hoverEl = document.createElement('img');
+    hoverEl.style.cssText = 'position:fixed;z-index:9999;max-width:244px;max-height:340px;pointer-events:none;display:none;box-shadow:0 4px 24px rgba(0,0,0,.6);border-radius:12px;';
+    document.body.appendChild(hoverEl);
+    document.addEventListener('mouseover', (e) => {
+      const tr = e.target.closest('tr[data-img]');
+      if (!tr) { hoverEl.style.display = 'none'; return; }
+      const url = tr.dataset.img;
+      hoverEl.src = url;
+      hoverEl.style.display = 'block';
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (hoverEl.style.display === 'none') return;
+      const x = Math.min(e.clientX + 16, window.innerWidth - 260);
+      const y = Math.min(e.clientY + 16, window.innerHeight - 360);
+      hoverEl.style.left = x + 'px';
+      hoverEl.style.top = y + 'px';
+    });
+    document.addEventListener('mouseout', (e) => {
+      if (!e.target.closest('tr[data-img]')) hoverEl.style.display = 'none';
+    });
+
+    // Fetch initial health + first snapshot before WS kicks in
+    fetch('/api/health').then(r => r.json()).then(h => {
+      if (h.attached) {
+        pidEl.textContent = h.pid ? `pid ${h.pid}` : 'attached';
+      } else {
+        pidEl.textContent = 'not attached';
+        statusEl.textContent = 'not attached';
+        statusEl.className = 'err';
+        errEl.textContent = h.last_error || '';
+      }
+    });
+    connect();
+  </script>
+</body>
+</html>

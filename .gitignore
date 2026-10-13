@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Project-specific
+# REA analysis cache — 250MB, locally regenerable
+backend/mtga_evidence.json
+
+# User data — contains match history with opponent screen names
+data/matches.sqlite
+data/matches.sqlite-journal
+data/matches.sqlite-wal
+data/matches.sqlite-shm
+
+# Lazy-fetched Scryfall card image cache
+data/card_images/
+
+# Transient probe/experiment scripts
+backend/probe*.py
+backend/temp*.py
+
+# Logs
+*.log
